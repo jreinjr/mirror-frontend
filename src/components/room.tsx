@@ -192,9 +192,10 @@ interface StageProps {
   resolution: { width: number; height: number };
   onOutputStreamReady: (stream: MediaStream | null) => void;
   prompts: Prompt[] | null;
+  focusMode?: boolean;
 }
 
-function Stage({ connected, onStreamReady, onComfyUIReady, resolution, onOutputStreamReady, prompts }: StageProps) {
+function Stage({ connected, onStreamReady, onComfyUIReady, resolution, onOutputStreamReady, prompts, focusMode }: StageProps) {
   const { remoteStream, peerConnection } = usePeerContext();
   const [frameRate, setFrameRate] = useState<number>(0);
   // Add state and refs for tracking frames
@@ -308,7 +309,7 @@ function Stage({ connected, onStreamReady, onComfyUIReady, resolution, onOutputS
         </div>
       )}
       
-      {hasVideo && (
+      {hasVideo && !focusMode && (
         <div className="absolute top-2 right-2 bg-black/50 text-white px-2 py-1 rounded text-sm">
           <TooltipProvider>
             <Tooltip>
@@ -320,8 +321,8 @@ function Stage({ connected, onStreamReady, onComfyUIReady, resolution, onOutputS
           </TooltipProvider>
         </div>
       )}
-      {/* Add StreamControlIcon at the bottom right corner of the video box */}
-  <StreamControl />
+      {/* Popout/preview button at the bottom right corner of the video box */}
+      {!focusMode && <StreamControl />}
     </div>
   );
 }
@@ -685,6 +686,7 @@ export const Room = () => {
                   resolution={config.resolution}
                   onOutputStreamReady={setOutputStream}
                   prompts={config.prompts || null}
+                  focusMode={isFocusMode}
                 />
                 {/* Thumbnail (mobile) */}
                 <div className={`absolute bottom-[8px] right-[8px] w-[70px] h-[70px] sm:w-[90px] sm:h-[90px] bg-slate-800 ${isFocusMode ? "hidden" : "block md:hidden"} overflow-hidden`}>
