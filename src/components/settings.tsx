@@ -197,6 +197,28 @@ function ConfigForm({ config, onSubmit }: ConfigFormProps) {
     defaultValues: config,
   });
 
+  // Seed the default stream URL from a server-side config source (config.yaml
+  // or env var) exposed via /api/config. Only applies it when the user hasn't
+  // customized the URL yet (i.e. it's still the built-in default), so query
+  // params and manual edits always win.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/config")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.streamUrl) return;
+        if (form.getValues("streamUrl") === DEFAULT_CONFIG.streamUrl) {
+          form.setValue("streamUrl", data.streamUrl);
+        }
+      })
+      .catch(() => {
+        /* config endpoint unavailable — keep the built-in default */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form]);
+
   // Ensure we request permissions once and enumerate devices without racing
   const isEnumeratingRef = useRef(false);
   const hasRequestedPermissionRef = useRef(false);

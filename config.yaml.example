@@ -1,0 +1,10 @@
+# Optional runtime config for the comfystream-mirror frontend.
+# Copy this file to `config.yaml` and edit. It is read on every request by
+# /api/config, so changes take effect without restarting the dev server.
+#
+# Precedence for the default stream URL:
+#   1. config.yaml  (this file)
+#   2. NEXT_PUBLIC_DEFAULT_STREAM_URL / DEFAULT_STREAM_URL env var (.env.local)
+#   3. built-in default (http://localhost:8889)
+
+streamUrl: http://localhost:8889

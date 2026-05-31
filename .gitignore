@@ -33,6 +33,10 @@ yarn-error.log*
 .env*
 !.env.example
 
+# local runtime config (use config.yaml.example as a template)
+config.yaml
+config.yml
+
 # vercel
 .vercel
 

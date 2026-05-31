@@ -25,11 +25,24 @@ Then open [http://localhost:3000](http://localhost:3000).
 The frontend talks to a comfystream server's `/offer` endpoint (proxied through
 this app's `/api/offer` route). The default server URL is `http://localhost:8889`.
 
-You can change it two ways:
+You can set the default three ways (highest priority first):
 
-- **At runtime:** open the Settings dialog in the UI and edit the stream URL.
-- **As a default:** set `NEXT_PUBLIC_DEFAULT_STREAM_URL` in `.env.local`
+- **`config.yaml`:** copy `config.yaml.example` to `config.yaml` and set
+  `streamUrl:`. Read at runtime via `/api/config`, so edits take effect without
+  restarting the dev server.
+- **Env var:** set `NEXT_PUBLIC_DEFAULT_STREAM_URL` in `.env.local`
   (see `.env.example`).
+- **At runtime:** open the Settings dialog in the UI and edit the stream URL
+  (always overrides the configured default for that session).
+
+## Hotkeys
+
+When a stream is loaded:
+
+- **`q`** — focus mode: show only the received stream, hide all other UI (and its
+  border). Press again to restore.
+- **Arrow keys** — nudge the received stream 10px in any direction to position it.
+- **Space** — show/hide the bottom node-settings bar.
 
 ## Scripts
 

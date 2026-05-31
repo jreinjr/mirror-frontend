@@ -583,6 +583,63 @@ export const Room = () => {
 
   const [isControlPanelOpen, setIsControlPanelOpen] = useState(false);
 
+  // Focus mode: show only the received (output) stream, hide all other UI.
+  const [isFocusMode, setIsFocusMode] = useState(false);
+  // Manual pixel offset for nudging the output stream into position (arrow keys).
+  const [outputOffset, setOutputOffset] = useState({ x: 0, y: 0 });
+
+  // Global hotkeys:
+  //   q       -> toggle focus mode (only the received stream is shown)
+  //   space   -> toggle the bottom settings bar (no-op until a stream is loaded)
+  //   arrows  -> nudge the output stream 10px to help position it
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't hijack typing in form fields / editable content.
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          tag === "SELECT" ||
+          target.isContentEditable
+        ) {
+          return;
+        }
+      }
+
+      switch (e.key) {
+        case "q":
+        case "Q":
+          setIsFocusMode((v) => !v);
+          break;
+        case " ": // space toggles the node-settings bar
+          e.preventDefault();
+          setIsControlPanelOpen((v) => !v);
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          setOutputOffset((o) => ({ ...o, y: o.y - 10 }));
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          setOutputOffset((o) => ({ ...o, y: o.y + 10 }));
+          break;
+        case "ArrowLeft":
+          e.preventDefault();
+          setOutputOffset((o) => ({ ...o, x: o.x - 10 }));
+          break;
+        case "ArrowRight":
+          e.preventDefault();
+          setOutputOffset((o) => ({ ...o, x: o.x + 10 }));
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   // Callback to handle first text output received
   const handleFirstTextOutput = useCallback(() => {
     if (!hasReceivedTextOutput && !isTranscriptionPanelOpen) {
@@ -609,11 +666,16 @@ export const Room = () => {
         >
           <div className="min-h-[100dvh] flex flex-col items-center justify-center md:justify-start">
             <div className="w-full max-h-[100dvh] flex flex-col md:flex-row landscape:flex-row justify-center items-center lg:space-x-4 md:pt-[10vh]">
-              {/* Output stream */}
-              <div 
-                className="relative w-full max-w-[100vw] sm:max-w-[640px] md:max-w-[512px] flex justify-center items-center bg-slate-900 sm:border-[2px] md:border-0 lg:border-2 rounded-md overflow-hidden"
+              {/* Output stream (the received stream from comfystream) */}
+              <div
+                className={`relative w-full max-w-[100vw] sm:max-w-[640px] md:max-w-[512px] flex justify-center items-center bg-slate-900 overflow-hidden ${
+                  isFocusMode
+                    ? "z-40"
+                    : "sm:border-[2px] md:border-0 lg:border-2 rounded-md"
+                }`}
                 style={{
                   aspectRatio: `${config.resolution.width}/${config.resolution.height}`,
+                  transform: `translate(${outputOffset.x}px, ${outputOffset.y}px)`,
                 }}
               >
                 <Stage
@@ -625,7 +687,7 @@ export const Room = () => {
                   prompts={config.prompts || null}
                 />
                 {/* Thumbnail (mobile) */}
-                <div className="absolute bottom-[8px] right-[8px] w-[70px] h-[70px] sm:w-[90px] sm:h-[90px] bg-slate-800 block md:hidden overflow-hidden">
+                <div className={`absolute bottom-[8px] right-[8px] w-[70px] h-[70px] sm:w-[90px] sm:h-[90px] bg-slate-800 ${isFocusMode ? "hidden" : "block md:hidden"} overflow-hidden`}>
                   <Webcam
                     onStreamReady={onStreamReady}
                     deviceId={config.selectedVideoDeviceId}
@@ -636,24 +698,26 @@ export const Room = () => {
                 </div>
               </div>
               {/* Input stream (desktop) */}
-              <div 
-                className="hidden md:flex w-full sm:w-full md:w-full max-w-[512px] flex justify-center items-center lg:border-2 lg:rounded-md bg-slate-800 overflow-hidden"
-                style={{
-                  aspectRatio: `${config.resolution.width}/${config.resolution.height}`,
-                }}
-              >
-                <Webcam
-                  onStreamReady={onStreamReady}
-                  deviceId={config.selectedVideoDeviceId}
-                  frameRate={config.frameRate}
-                  selectedAudioDeviceId={config.selectedAudioDeviceId}
-                  resolution={config.resolution}
-                />
-              </div>
+              {!isFocusMode && (
+                <div
+                  className="hidden md:flex w-full sm:w-full md:w-full max-w-[512px] flex justify-center items-center lg:border-2 lg:rounded-md bg-slate-800 overflow-hidden"
+                  style={{
+                    aspectRatio: `${config.resolution.width}/${config.resolution.height}`,
+                  }}
+                >
+                  <Webcam
+                    onStreamReady={onStreamReady}
+                    deviceId={config.selectedVideoDeviceId}
+                    frameRate={config.frameRate}
+                    selectedAudioDeviceId={config.selectedAudioDeviceId}
+                    resolution={config.resolution}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Text Output toggle under videos */}
-            {isConnected && (
+            {isConnected && !isFocusMode && (
               <div className="w-full flex justify-center mt-4">
                 <button
                   onClick={() => setIsTranscriptionPanelOpen(!isTranscriptionPanelOpen)}
@@ -690,7 +754,7 @@ export const Room = () => {
             )}
 
             {/* Button group: Record, Show Recordings, Gear */}
-            <div className="fixed top-4 right-4 flex flex-row items-end space-x-4 z-50">
+            <div className={`fixed top-4 right-4 flex-row items-end space-x-4 z-50 ${isFocusMode ? "hidden" : "flex"}`}>
               {/* Stream Settings button (shown when not streaming) */}
               {!localStream && (
                 <button
@@ -741,7 +805,7 @@ export const Room = () => {
             </div>
             {/* Text Output Panel (below videos) - kept mounted to preserve content */}
             {isConnected && (
-              <div className={`w-full flex justify-center px-4 mt-4 ${isTranscriptionPanelOpen ? '' : 'hidden'}`}>
+              <div className={`w-full flex justify-center px-4 mt-4 ${isTranscriptionPanelOpen && !isFocusMode ? '' : 'hidden'}`}>
                 <div className="w-full max-w-[1040px]">
                   <TranscriptionViewerWrapper onFirstTextOutput={handleFirstTextOutput} />
                 </div>
