@@ -5,7 +5,7 @@ import { StreamConfig, StreamSettings, DEFAULT_CONFIG } from "@/components/setti
 import { Webcam } from "@/components/webcam";
 import { usePeerContext } from "@/context/peer-context";
 import { Prompt } from "@/types";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 import {
   Tooltip,
@@ -20,6 +20,17 @@ import fixWebmDuration from 'webm-duration-fix';
 import { set, get, del, keys } from 'idb-keyval';
 import { Drawer, DrawerContent, DrawerTitle } from "./ui/drawer";
 import * as Tabs from '@radix-ui/react-tabs';
+
+// Visually hide an element while keeping it laid out and rendered, so any
+// <canvas>/<video> inside keeps producing frames (e.g. captureStream() for the
+// WebRTC send track). display:none would stop that on some GPUs (Raspberry Pi).
+const OFFSCREEN_STYLE: CSSProperties = {
+  position: "fixed",
+  left: "-100000px",
+  top: 0,
+  opacity: 0,
+  pointerEvents: "none",
+};
 
 // Custom hook for managing toast lifecycle
 function useToast() {
@@ -694,7 +705,10 @@ export const Room = () => {
                   focusMode={isFocusMode}
                 />
                 {/* Thumbnail (mobile) */}
-                <div className={`absolute bottom-[8px] right-[8px] w-[70px] h-[70px] sm:w-[90px] sm:h-[90px] bg-slate-800 ${isFocusMode ? "hidden" : "block md:hidden"} overflow-hidden`}>
+                <div
+                  className="absolute bottom-[8px] right-[8px] w-[70px] h-[70px] sm:w-[90px] sm:h-[90px] bg-slate-800 block md:hidden overflow-hidden"
+                  style={isFocusMode ? OFFSCREEN_STYLE : undefined}
+                >
                   <Webcam
                     onStreamReady={onStreamReady}
                     deviceId={config.selectedVideoDeviceId}
@@ -704,15 +718,17 @@ export const Room = () => {
                   />
                 </div>
               </div>
-              {/* Input stream (desktop). Kept mounted in focus mode (just
-                  hidden) so the local send stream — and therefore the received
-                  stream — keeps running. */}
+              {/* Input stream (desktop). In focus mode it is moved off-screen
+                  (NOT display:none) so the canvas keeps drawing and its
+                  captureStream — the track we send over WebRTC — keeps running.
+                  A display:none canvas stops producing frames (notably on the
+                  Raspberry Pi), which would kill both the send and the received
+                  stream. */}
               <div
-                className={`w-full sm:w-full md:w-full max-w-[512px] justify-center items-center lg:border-2 lg:rounded-md bg-slate-800 overflow-hidden ${
-                  isFocusMode ? "hidden" : "hidden md:flex"
-                }`}
+                className="hidden md:flex w-full sm:w-full md:w-full max-w-[512px] flex justify-center items-center lg:border-2 lg:rounded-md bg-slate-800 overflow-hidden"
                 style={{
                   aspectRatio: `${config.resolution.width}/${config.resolution.height}`,
+                  ...(isFocusMode ? OFFSCREEN_STYLE : {}),
                 }}
               >
                 <Webcam
