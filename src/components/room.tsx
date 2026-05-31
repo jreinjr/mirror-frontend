@@ -676,7 +676,12 @@ export const Room = () => {
                 }`}
                 style={{
                   aspectRatio: `${config.resolution.width}/${config.resolution.height}`,
-                  transform: `translate(${outputOffset.x}px, ${outputOffset.y}px)`,
+                  // Nudge via left/top (the box is position: relative) rather than
+                  // a CSS transform — a transform on a video's ancestor forces the
+                  // <video> off the hardware overlay plane and renders it black on
+                  // some GPUs (notably Raspberry Pi). left/top avoids that.
+                  left: outputOffset.x,
+                  top: outputOffset.y,
                 }}
               >
                 <Stage
