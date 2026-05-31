@@ -697,23 +697,25 @@ export const Room = () => {
                   />
                 </div>
               </div>
-              {/* Input stream (desktop) */}
-              {!isFocusMode && (
-                <div
-                  className="hidden md:flex w-full sm:w-full md:w-full max-w-[512px] flex justify-center items-center lg:border-2 lg:rounded-md bg-slate-800 overflow-hidden"
-                  style={{
-                    aspectRatio: `${config.resolution.width}/${config.resolution.height}`,
-                  }}
-                >
-                  <Webcam
-                    onStreamReady={onStreamReady}
-                    deviceId={config.selectedVideoDeviceId}
-                    frameRate={config.frameRate}
-                    selectedAudioDeviceId={config.selectedAudioDeviceId}
-                    resolution={config.resolution}
-                  />
-                </div>
-              )}
+              {/* Input stream (desktop). Kept mounted in focus mode (just
+                  hidden) so the local send stream — and therefore the received
+                  stream — keeps running. */}
+              <div
+                className={`w-full sm:w-full md:w-full max-w-[512px] justify-center items-center lg:border-2 lg:rounded-md bg-slate-800 overflow-hidden ${
+                  isFocusMode ? "hidden" : "hidden md:flex"
+                }`}
+                style={{
+                  aspectRatio: `${config.resolution.width}/${config.resolution.height}`,
+                }}
+              >
+                <Webcam
+                  onStreamReady={onStreamReady}
+                  deviceId={config.selectedVideoDeviceId}
+                  frameRate={config.frameRate}
+                  selectedAudioDeviceId={config.selectedAudioDeviceId}
+                  resolution={config.resolution}
+                />
+              </div>
             </div>
 
             {/* Text Output toggle under videos */}
