@@ -32,6 +32,21 @@ const OFFSCREEN_STYLE: CSSProperties = {
   pointerEvents: "none",
 };
 
+// Initial output-box position/scale, loaded from NEXT_PUBLIC_* env vars so a
+// layout dialed in with the arrow / w / e hotkeys can be persisted across
+// reloads. The non-focus-mode readout prints these same values back in env-file
+// format so they can be pasted straight into .env.
+const envNum = (v: string | undefined, fallback: number): number => {
+  if (v == null || v.trim() === "") return fallback;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+};
+const INITIAL_OUTPUT_OFFSET = {
+  x: envNum(process.env.NEXT_PUBLIC_OUTPUT_OFFSET_X, 0),
+  y: envNum(process.env.NEXT_PUBLIC_OUTPUT_OFFSET_Y, 0),
+};
+const INITIAL_OUTPUT_SCALE = envNum(process.env.NEXT_PUBLIC_OUTPUT_SCALE, 1);
+
 // Custom hook for managing toast lifecycle
 function useToast() {
   const toastIdRef = useRef<string | number | undefined>(undefined);
@@ -598,12 +613,35 @@ export const Room = () => {
   // Focus mode: show only the received (output) stream, hide all other UI.
   const [isFocusMode, setIsFocusMode] = useState(false);
   // Manual pixel offset for nudging the output stream into position (arrow keys).
-  const [outputOffset, setOutputOffset] = useState({ x: 0, y: 0 });
+  // Seeded from NEXT_PUBLIC_OUTPUT_OFFSET_X / _Y so a saved layout is restored.
+  const [outputOffset, setOutputOffset] = useState(INITIAL_OUTPUT_OFFSET);
+  // Uniform scale of the output stream box (w/e keys), 1 = base size.
+  // Seeded from NEXT_PUBLIC_OUTPUT_SCALE so a saved layout is restored.
+  const [outputScale, setOutputScale] = useState(INITIAL_OUTPUT_SCALE);
+  // The output box's natural (scale === 1) size, captured so we can scale by
+  // resizing the element instead of via a CSS transform — a transform forces
+  // the <video> off the GPU overlay plane and renders it black on some GPUs
+  // (notably Raspberry Pi). See the left/top nudge note below.
+  const outputBoxRef = useRef<HTMLDivElement | null>(null);
+  const baseSizeRef = useRef<{ w: number; h: number } | null>(null);
+
+  // While at base scale, keep recording the box's natural size so the scaled
+  // width/height stay correct across viewport/breakpoint changes. If we start
+  // at a non-1 scale (loaded from the env file), capture the size on the first
+  // render too — the box still renders unscaled until baseSizeRef is set, so
+  // that first measurement is the natural size we need.
+  useEffect(() => {
+    const el = outputBoxRef.current;
+    if (el && (outputScale === 1 || baseSizeRef.current === null)) {
+      baseSizeRef.current = { w: el.offsetWidth, h: el.offsetHeight };
+    }
+  });
 
   // Global hotkeys:
   //   q       -> toggle focus mode (only the received stream is shown)
   //   space   -> toggle the bottom settings bar (no-op until a stream is loaded)
   //   arrows  -> nudge the output stream 10px to help position it
+  //   w / e   -> scale the output stream up / down by 2% of its base size
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't hijack typing in form fields / editable content.
@@ -645,6 +683,16 @@ export const Room = () => {
           e.preventDefault();
           setOutputOffset((o) => ({ ...o, x: o.x + 10 }));
           break;
+        case "w":
+        case "W":
+          e.preventDefault();
+          setOutputScale((s) => s + 0.02);
+          break;
+        case "e":
+        case "E":
+          e.preventDefault();
+          setOutputScale((s) => Math.max(0.02, s - 0.02));
+          break;
       }
     };
 
@@ -659,6 +707,22 @@ export const Room = () => {
       setIsTranscriptionPanelOpen(true);
     }
   }, [hasReceivedTextOutput, isTranscriptionPanelOpen]);
+
+  // Current output-box layout, formatted to paste straight into the env file.
+  // Offsets are whole pixels (10px steps); scale snaps to the 0.02 hotkey step.
+  const layoutOffsetX = Math.round(outputOffset.x);
+  const layoutOffsetY = Math.round(outputOffset.y);
+  const layoutScale = Math.round(outputScale * 100) / 100;
+  const layoutEnvText =
+    `NEXT_PUBLIC_OUTPUT_OFFSET_X=${layoutOffsetX}\n` +
+    `NEXT_PUBLIC_OUTPUT_OFFSET_Y=${layoutOffsetY}\n` +
+    `NEXT_PUBLIC_OUTPUT_SCALE=${layoutScale}`;
+  const copyLayoutEnv = useCallback(() => {
+    navigator.clipboard
+      ?.writeText(layoutEnvText)
+      .then(() => showToast("Copied layout to clipboard", "success"))
+      .catch(() => showToast("Copy failed", "error"));
+  }, [layoutEnvText, showToast]);
 
   return (
     <main className="fixed inset-0 overflow-hidden overscroll-none">
@@ -680,6 +744,7 @@ export const Room = () => {
             <div className="w-full max-h-[100dvh] flex flex-col md:flex-row landscape:flex-row justify-center items-center lg:space-x-4 md:pt-[10vh]">
               {/* Output stream (the received stream from comfystream) */}
               <div
+                ref={outputBoxRef}
                 className={`relative w-full max-w-[100vw] sm:max-w-[640px] md:max-w-[512px] flex justify-center items-center bg-slate-900 overflow-hidden ${
                   isFocusMode
                     ? "z-40"
@@ -693,6 +758,15 @@ export const Room = () => {
                   // some GPUs (notably Raspberry Pi). left/top avoids that.
                   left: outputOffset.x,
                   top: outputOffset.y,
+                  // Scale (w/e keys) by resizing the element rather than via a CSS
+                  // transform, for the same overlay-plane reason as the nudge above.
+                  ...(outputScale !== 1 && baseSizeRef.current
+                    ? {
+                        width: baseSizeRef.current.w * outputScale,
+                        height: baseSizeRef.current.h * outputScale,
+                        maxWidth: "none",
+                      }
+                    : {}),
                 }}
               >
                 <Stage
@@ -828,6 +902,26 @@ export const Room = () => {
                 <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="feather feather-film"><rect x="2" y="7" width="20" height="10" rx="2" ry="2"></rect><path d="M6 7V5M6 19v-2M18 7V5M18 19v-2"></path></svg>
               </button>
             </div>
+            {/* Output-box layout readout. Shown only outside focus mode; prints
+                the current position/scale in env-file format so it can be copied
+                into NEXT_PUBLIC_OUTPUT_OFFSET_X/_Y / _SCALE to persist the layout. */}
+            {!isFocusMode && (
+              <div className="fixed bottom-4 left-4 z-50 bg-black/70 text-white rounded-md px-3 py-2 text-xs font-mono shadow-lg select-text">
+                <div className="flex items-center justify-between gap-3 mb-1">
+                  <span className="opacity-70">Output layout</span>
+                  <button
+                    onClick={copyLayoutEnv}
+                    className="px-2 py-0.5 rounded bg-white/15 hover:bg-white/25 transition-colors"
+                    title="Copy these lines to the clipboard"
+                  >
+                    Copy
+                  </button>
+                </div>
+                <div>NEXT_PUBLIC_OUTPUT_OFFSET_X={layoutOffsetX}</div>
+                <div>NEXT_PUBLIC_OUTPUT_OFFSET_Y={layoutOffsetY}</div>
+                <div>NEXT_PUBLIC_OUTPUT_SCALE={layoutScale}</div>
+              </div>
+            )}
             {/* Text Output Panel (below videos) - kept mounted to preserve content */}
             {isConnected && (
               <div className={`w-full flex justify-center px-4 mt-4 ${isTranscriptionPanelOpen && !isFocusMode ? '' : 'hidden'}`}>
