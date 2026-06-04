@@ -49,21 +49,21 @@
   },
   "9": {
     "inputs": {
-      "rotate_pitch": -12,
+      "rotate_pitch": -10,
       "rotate_yaw": 0,
       "rotate_roll": 0,
       "blink": 0,
       "eyebrow": 0,
       "wink": 0,
       "pupil_x": 0,
-      "pupil_y": 6,
+      "pupil_y": 1,
       "aaa": 1,
       "eee": 0.1,
       "woo": 0,
       "smile": 0.1,
       "src_ratio": 0.9,
       "sample_ratio": 0.9,
-      "crop_factor": 2.5,
+      "crop_factor": 2.2,
       "src_image": [
         "50",
         0

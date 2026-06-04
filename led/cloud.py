@@ -24,8 +24,8 @@ PAN_SPEED = 0.03    # how fast the cloud drifts across the frame
 PAN_ANGLE = 90.0    # drift direction in degrees (0=+x right, 90=+y up)
 OCTAVES = 4         # fBm octaves -> texture detail
 CONTRAST = 2.5      # spreads the noise toward dark/bright extremes
-MIN_BRI = 0.4      # brightness where noise is darkest
-MAX_BRI = 0.8       # brightness where noise is brightest
+MIN_BRI = 0.1      # brightness where noise is darkest
+MAX_BRI = 0.5       # brightness where noise is brightest
 COLORS = m.DEFAULT_PALETTE
 
 

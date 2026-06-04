@@ -182,6 +182,9 @@ export const usePrompt = () => useContext(PromptContext);
 
 function ConfigForm({ config, onSubmit }: ConfigFormProps) {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
+  // Name of the currently loaded workflow (default from env, or an uploaded
+  // file), shown under the file picker so the prefilled default is visible.
+  const [workflowName, setWorkflowName] = useState<string | null>(null);
   const { setOriginalPrompts } = usePrompt();
   const [videoDevices, setVideoDevices] = useState<AVDevice[]>([]);
   const [audioDevices, setAudioDevices] = useState<AVDevice[]>([]);
@@ -197,27 +200,37 @@ function ConfigForm({ config, onSubmit }: ConfigFormProps) {
     defaultValues: config,
   });
 
-  // Seed the default stream URL from a server-side config source (config.yaml
-  // or env var) exposed via /api/config. Only applies it when the user hasn't
-  // customized the URL yet (i.e. it's still the built-in default), so query
-  // params and manual edits always win.
+  // Seed the default stream URL and default workflow from a server-side config
+  // source (config.yaml or env vars) exposed via /api/config. The URL is only
+  // applied when the user hasn't customized it yet (i.e. it's still the built-in
+  // default), so query params and manual edits always win. The default workflow
+  // is prefilled so the stream starts with it unless the user uploads another.
   useEffect(() => {
     let cancelled = false;
     fetch("/api/config")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (cancelled || !data?.streamUrl) return;
-        if (form.getValues("streamUrl") === DEFAULT_CONFIG.streamUrl) {
+        if (cancelled || !data) return;
+        if (
+          data.streamUrl &&
+          form.getValues("streamUrl") === DEFAULT_CONFIG.streamUrl
+        ) {
           form.setValue("streamUrl", data.streamUrl);
+        }
+        if (data.workflow?.prompt) {
+          const prompt = data.workflow.prompt as Prompt;
+          setPrompts([prompt]);
+          setOriginalPrompts([prompt]);
+          setWorkflowName(data.workflow.name ?? "workflow.json");
         }
       })
       .catch(() => {
-        /* config endpoint unavailable — keep the built-in default */
+        /* config endpoint unavailable — keep the built-in defaults */
       });
     return () => {
       cancelled = true;
     };
-  }, [form]);
+  }, [form, setOriginalPrompts]);
 
   // Ensure we request permissions once and enumerate devices without racing
   const isEnumeratingRef = useRef(false);
@@ -318,6 +331,7 @@ function ConfigForm({ config, onSubmit }: ConfigFormProps) {
       const allPrompts = await Promise.all(fileReads);
       setPrompts(allPrompts);
       setOriginalPrompts(allPrompts);
+      setWorkflowName(files.map((f) => f.name).join(", "));
     } catch (err) {
       console.error("Failed to parse one or more JSON files.", err);
       toast.error("Failed to Parse Workflow", {
@@ -503,9 +517,16 @@ function ConfigForm({ config, onSubmit }: ConfigFormProps) {
             onChange={handlePromptsChange}
             required={false}
           />
-          <div className="text-sm text-gray-500">
-            Optional: Leave empty for passthrough mode
-          </div>
+          {workflowName ? (
+            <div className="text-sm text-gray-700">
+              Loaded: <span className="font-medium">{workflowName}</span>
+              <span className="text-gray-500"> (upload to replace)</span>
+            </div>
+          ) : (
+            <div className="text-sm text-gray-500">
+              Optional: Leave empty for passthrough mode
+            </div>
+          )}
         </div>
 
         <Button type="submit" className="w-full mt-4 mb-4">

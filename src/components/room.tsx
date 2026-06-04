@@ -1,11 +1,11 @@
 "use client";
 
 import { PeerConnector } from "@/components/peer";
-import { StreamConfig, StreamSettings, DEFAULT_CONFIG } from "@/components/settings";
+import { StreamConfig, StreamSettings, DEFAULT_CONFIG, usePrompt } from "@/components/settings";
 import { Webcam } from "@/components/webcam";
 import { usePeerContext } from "@/context/peer-context";
 import { Prompt } from "@/types";
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { toast } from "sonner";
 import {
   Tooltip,
@@ -46,12 +46,20 @@ const INITIAL_OUTPUT_OFFSET = {
   y: envNum(process.env.NEXT_PUBLIC_OUTPUT_OFFSET_Y, 0),
 };
 const INITIAL_OUTPUT_SCALE = envNum(process.env.NEXT_PUBLIC_OUTPUT_SCALE, 1);
+// Launch in focus mode (only the output stream shown) unless explicitly
+// disabled with NEXT_PUBLIC_FOCUS_MODE=false. Toggle at runtime with `q`.
+const INITIAL_FOCUS_MODE =
+  (process.env.NEXT_PUBLIC_FOCUS_MODE ?? "true").trim().toLowerCase() !== "false";
 
-// Custom hook for managing toast lifecycle
-function useToast() {
+// Custom hook for managing toast lifecycle. Pass a ref that is truthy while in
+// focus mode to suppress all toasts (status notifications like "Stream
+// disconnected" / "ComfyUI initializing") — in focus mode only the video shows.
+function useToast(suppressRef?: RefObject<boolean>) {
   const toastIdRef = useRef<string | number | undefined>(undefined);
-  
+
   const showToast = useCallback((message: string, type: 'loading' | 'success' | 'error' = 'loading') => {
+    // Suppress status toasts while in focus mode.
+    if (suppressRef?.current) return;
     // Always dismiss previous toast first
     if (toastIdRef.current) {
       toast.dismiss(toastIdRef.current);
@@ -69,7 +77,7 @@ function useToast() {
     
     toastIdRef.current = id;
     return id;
-  }, []);
+  }, [suppressRef]);
   
   const dismissToast = useCallback(() => {
     if (toastIdRef.current) {
@@ -296,14 +304,17 @@ function Stage({ connected, onStreamReady, onComfyUIReady, resolution, onOutputS
 
   if (!connected || !remoteStream) {
     return (
-      <div 
+      <div
         className="relative w-full h-full flex items-center justify-center bg-black"
         style={{ aspectRatio: `${resolution.width}/${resolution.height}` }}
       >
-        <div className="flex flex-col items-center space-y-3">
-          <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-white"></div>
-          <p className="text-white text-center opacity-80">Waiting for stream...</p>
-        </div>
+        {/* In focus mode show only the (black) video area — hide the status spinner. */}
+        {!focusMode && (
+          <div className="flex flex-col items-center space-y-3">
+            <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-white"></div>
+            <p className="text-white text-center opacity-80">Waiting for stream...</p>
+          </div>
+        )}
       </div>
     );
   }
@@ -321,8 +332,9 @@ function Stage({ connected, onStreamReady, onComfyUIReady, resolution, onOutputS
         onFrame={handleFrame}
       />
       
-      {/* Show warm-up overlay when we have a stream but ComfyUI isn't ready yet */}
-      {hasVideo && !isComfyUIReady && (
+      {/* Show warm-up overlay when we have a stream but ComfyUI isn't ready yet.
+          Hidden in focus mode so only the video is visible. */}
+      {hasVideo && !isComfyUIReady && !focusMode && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/30">
           <div className="flex flex-col items-center space-y-3 bg-black/50 p-4 rounded-lg">
             <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-white"></div>
@@ -360,13 +372,20 @@ function Stage({ connected, onStreamReady, onComfyUIReady, resolution, onOutputS
 export const Room = () => {
   const [connect, setConnect] = useState<boolean>(false);
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  // In focus mode the Stream Settings panel never shows — we auto-connect
+  // instead (see the focus-mode effects below). Otherwise it opens on launch so
+  // the user can pick devices and click connect.
   const [isStreamSettingsOpen, setIsStreamSettingsOpen] =
-    useState<boolean>(true);
+    useState<boolean>(!INITIAL_FOCUS_MODE);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [outputStream, _setOutputStream] = useState<MediaStream | null>(null);
   
-  // Use the custom toast hook
-  const { showToast, dismissToast, toastId } = useToast();
+  // Tracks focus mode for code (toasts) that runs outside render. Seeded from
+  // INITIAL_FOCUS_MODE and kept in sync with the isFocusMode state below.
+  const isFocusModeRef = useRef(INITIAL_FOCUS_MODE);
+
+  // Use the custom toast hook (suppresses status toasts while in focus mode)
+  const { showToast, dismissToast, toastId } = useToast(isFocusModeRef);
   
   // Add state to track if ComfyUI is ready
   const [isComfyUIReady, setIsComfyUIReady] = useState<boolean>(false);
@@ -402,6 +421,17 @@ export const Room = () => {
   });
 
   const connectingRef = useRef(false);
+
+  // Focus-mode auto-connect: when launched in focus mode we hide the Stream
+  // Settings panel and connect automatically. The connection must start only
+  // once BOTH the workflow and the camera are ready, so the initial WebRTC
+  // offer carries the right prompts. setOriginalPrompts mirrors the workflow
+  // into the control panels, exactly as the manual settings form does.
+  const { setOriginalPrompts } = usePrompt();
+  const autoConnectStartedRef = useRef(false);
+  // The resolved stream URL, stashed during phase 1 and applied in phase 2 once
+  // the camera is live (null until phase 1 finishes).
+  const [autoConnectStreamUrl, setAutoConnectStreamUrl] = useState<string | null>(null);
 
   const onStreamReady = useCallback((stream: MediaStream) => {
     setLocalStream(stream);
@@ -446,6 +476,81 @@ export const Room = () => {
       connectingRef.current = true;
     }
   }, [config.streamUrl, showToast, dismissToast]);
+
+  // Focus-mode auto-connect, phase 1: resolve the default stream URL + workflow
+  // from /api/config and the default camera/mic, then start the camera by
+  // setting the config — but with an empty streamUrl so the connect effect
+  // above stays idle. We connect in phase 2 only after the camera is live.
+  useEffect(() => {
+    if (!INITIAL_FOCUS_MODE || autoConnectStartedRef.current) return;
+    autoConnectStartedRef.current = true;
+
+    let cancelled = false;
+    (async () => {
+      // Resolve the default stream URL and workflow exactly like the settings
+      // form does (via /api/config). Falls back to the built-in URL and
+      // passthrough (no workflow) if the endpoint is unavailable.
+      let streamUrl = DEFAULT_CONFIG.streamUrl;
+      let prompts: Prompt[] | null = null;
+      try {
+        const res = await fetch("/api/config");
+        const data = res.ok ? await res.json() : null;
+        if (data?.streamUrl) streamUrl = data.streamUrl;
+        if (data?.workflow?.prompt) {
+          prompts = [data.workflow.prompt as Prompt];
+          setOriginalPrompts(prompts);
+        }
+      } catch {
+        /* config endpoint unavailable — keep the built-in defaults */
+      }
+
+      // Request camera/mic permission once, then pick the first real camera and
+      // microphone — the same defaults the settings form would prefill.
+      let videoDeviceId = "none";
+      let audioDeviceId = "none";
+      try {
+        const perm = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        perm.getTracks().forEach((t) => t.stop());
+      } catch (err) {
+        console.warn("[Room] Auto-connect permission request failed:", err);
+      }
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cam = devices.find((d) => d.kind === "videoinput" && d.deviceId);
+        const mic = devices.find((d) => d.kind === "audioinput" && d.deviceId);
+        if (cam) videoDeviceId = cam.deviceId;
+        if (mic) audioDeviceId = mic.deviceId;
+      } catch (err) {
+        console.error("[Room] Auto-connect device enumeration failed:", err);
+      }
+
+      if (cancelled) return;
+
+      // Stash the URL for phase 2 and start the camera (frameRate + resolution
+      // come from DEFAULT_CONFIG). streamUrl stays empty so we don't connect yet.
+      setAutoConnectStreamUrl(streamUrl);
+      setConfig({
+        ...DEFAULT_CONFIG,
+        streamUrl: "",
+        selectedVideoDeviceId: videoDeviceId,
+        selectedAudioDeviceId: audioDeviceId,
+        prompts,
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setOriginalPrompts]);
+
+  // Focus-mode auto-connect, phase 2: the camera stream is live — apply the
+  // resolved stream URL to fire the connect effect above. The workflow prompts
+  // are already in config, so the offer goes out with them.
+  useEffect(() => {
+    if (!INITIAL_FOCUS_MODE || !autoConnectStreamUrl || !localStream) return;
+    if (config.streamUrl) return; // already connecting/connected
+    setConfig((prev) => ({ ...prev, streamUrl: autoConnectStreamUrl }));
+  }, [autoConnectStreamUrl, localStream, config.streamUrl]);
 
   const handleConnected = useCallback(() => {
     setIsConnected(true);
@@ -611,7 +716,13 @@ export const Room = () => {
   const [isControlPanelOpen, setIsControlPanelOpen] = useState(false);
 
   // Focus mode: show only the received (output) stream, hide all other UI.
-  const [isFocusMode, setIsFocusMode] = useState(false);
+  const [isFocusMode, setIsFocusMode] = useState(INITIAL_FOCUS_MODE);
+  // Keep the ref in sync so suppressed toasts track the current mode, and clear
+  // any toast still on screen when entering focus mode.
+  useEffect(() => {
+    isFocusModeRef.current = isFocusMode;
+    if (isFocusMode) dismissToast();
+  }, [isFocusMode, dismissToast]);
   // Manual pixel offset for nudging the output stream into position (arrow keys).
   // Seeded from NEXT_PUBLIC_OUTPUT_OFFSET_X / _Y so a saved layout is restored.
   const [outputOffset, setOutputOffset] = useState(INITIAL_OUTPUT_OFFSET);
@@ -623,17 +734,29 @@ export const Room = () => {
   // the <video> off the GPU overlay plane and renders it black on some GPUs
   // (notably Raspberry Pi). See the left/top nudge note below.
   const outputBoxRef = useRef<HTMLDivElement | null>(null);
-  const baseSizeRef = useRef<{ w: number; h: number } | null>(null);
+  // Kept in state, not a ref: capturing it must trigger a re-render so a scale
+  // loaded from env actually applies on first paint. With a ref, the box stays
+  // unscaled until some unrelated state change happens to re-render it.
+  const [baseSize, setBaseSize] = useState<{ w: number; h: number } | null>(null);
 
   // While at base scale, keep recording the box's natural size so the scaled
   // width/height stay correct across viewport/breakpoint changes. If we start
   // at a non-1 scale (loaded from the env file), capture the size on the first
-  // render too — the box still renders unscaled until baseSizeRef is set, so
-  // that first measurement is the natural size we need.
+  // render too — the box still renders unscaled until baseSize is known, so
+  // that first measurement is the true natural size. Intentionally depless so it
+  // re-measures across viewport/breakpoint changes while at scale 1; the
+  // equality guard returns the previous object when unchanged, so React bails
+  // out and it never loops.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const el = outputBoxRef.current;
-    if (el && (outputScale === 1 || baseSizeRef.current === null)) {
-      baseSizeRef.current = { w: el.offsetWidth, h: el.offsetHeight };
+    if (!el) return;
+    if (outputScale === 1 || baseSize === null) {
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      setBaseSize((prev) =>
+        prev && prev.w === w && prev.h === h ? prev : { w, h },
+      );
     }
   });
 
@@ -725,7 +848,11 @@ export const Room = () => {
   }, [layoutEnvText, showToast]);
 
   return (
-    <main className="fixed inset-0 overflow-hidden overscroll-none">
+    <main
+      className={`fixed inset-0 overflow-hidden overscroll-none ${
+        isFocusMode ? "cursor-none" : ""
+      }`}
+    >
       <meta
         name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
@@ -760,11 +887,17 @@ export const Room = () => {
                   top: outputOffset.y,
                   // Scale (w/e keys) by resizing the element rather than via a CSS
                   // transform, for the same overlay-plane reason as the nudge above.
-                  ...(outputScale !== 1 && baseSizeRef.current
+                  // flexShrink:0 stops the parent flex row from clamping the width
+                  // once the box grows past the viewport — without it the width
+                  // pins to screen width while height keeps growing, so the
+                  // object-contain <video> stops scaling. Overflow is clipped by
+                  // the page's overflow-hidden, which is what we want here.
+                  ...(outputScale !== 1 && baseSize
                     ? {
-                        width: baseSizeRef.current.w * outputScale,
-                        height: baseSizeRef.current.h * outputScale,
+                        width: baseSize.w * outputScale,
+                        height: baseSize.h * outputScale,
                         maxWidth: "none",
+                        flexShrink: 0,
                       }
                     : {}),
                 }}
