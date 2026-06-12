@@ -33,7 +33,7 @@
   },
   "8": {
     "inputs": {
-      "video": "Drama (1).mp4",
+      "video": "Drama.mp4",
       "force_rate": 30,
       "custom_width": 0,
       "custom_height": 0,
@@ -49,7 +49,7 @@
   },
   "9": {
     "inputs": {
-      "rotate_pitch": -10,
+      "rotate_pitch": -12,
       "rotate_yaw": 0,
       "rotate_roll": 0,
       "blink": 0,
@@ -63,7 +63,8 @@
       "smile": 0.1,
       "src_ratio": 0.9,
       "sample_ratio": 0.9,
-      "crop_factor": 2.2,
+      "sample_parts": "All",
+      "crop_factor": 2.3,
       "src_image": [
         "50",
         0
